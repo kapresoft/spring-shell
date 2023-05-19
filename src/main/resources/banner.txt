@@ -1,0 +1,6 @@
+
+:: ---------------------------------------------
+:: ${spring.application.title} (${spring.application.version})
+:: Active Profile(s): ${spring.profiles.active:}
+::       Spring Boot: ${spring-boot.formatted-version}
+:: ---------------------------------------------

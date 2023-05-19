@@ -4,7 +4,7 @@ import com.amazonaws.services.cloudfront.AmazonCloudFront;
 import com.amazonaws.services.cloudfront.AmazonCloudFrontClientBuilder;
 import com.amazonaws.services.cloudfront.model.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kapresoft.devops.shell.DefaultSettings;
+import com.kapresoft.devops.shell.opt.DefaultSettings;
 import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
 import org.springframework.shell.standard.ShellComponent;
@@ -56,17 +56,17 @@ public class CDNCommands {
 
 
     /**
-     * <b>Usage:</b> cdn-get --dist {@code <Distribution-ID>};
+     * <b>Usage:</b> get --dist {@code <Distribution-ID>};
      * <pre>{@code
-     * shell:> cdn-get E1ODOX7NPJ77SQ
-     * shell:> cdn-get --dist E1ODOX7NPJ77SQ
+     * shell:> get E1ODOX7NPJ77SQ
+     * shell:> get --dist E1ODOX7NPJ77SQ
      * }</pre>
      *
      * @param optionalDistID The CloudFront Distribution ID
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Get CloudFront Distribution Config", key = "cdn-get")
+    @ShellMethod(value = "Get CloudFront Distribution Config", key = "get")
     public String cdnGetConfig(@ShellOption(value = "dist", defaultValue = "") String optionalDistID) {
         var distID = resolveDistID(optionalDistID);
         if (!hasLength(distID)) {
@@ -84,10 +84,10 @@ public class CDNCommands {
     }
 
     /**
-     * <b>Usage:</b> cdn-update-path {@code <distID> <path>}
+     * <b>Usage:</b> update-path {@code <distID> <path>}
      * <pre>{@code
-     * shell:> cdn-update-path [distID] [path]
-     * shell:> cdn-update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
+     * shell:> update-path [distID] [path]
+     * shell:> update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
      * }</pre>
      *
      * @param distIDArg The CloudFront Distribution ID
@@ -95,7 +95,7 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Update the CloudFront distribution origin path", key = "cdn-update-path")
+    @ShellMethod(value = "Update the CloudFront distribution origin path", key = "update-path")
     public String cdnUpdatePath(@ShellOption(value = "dist", defaultValue = "") String distIDArg,
                                 @ShellOption(value = "path", help = "The new path value, i.e. '/live-123'") String newPath) {
         var distID = resolveDistID(distIDArg);

@@ -1,0 +1,7 @@
+logging:
+  level:
+    root: info
+    org.springframework.shell: warn
+    com.kapresoft.devops.shell: info
+  pattern:
+    console: "%clr([%4.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"

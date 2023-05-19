@@ -1,0 +1,15 @@
+spring:
+  application:
+    title: KapreSoft CDN Spring Shell
+    version: kapresoft-cdn-shell-1.0
+  profiles:
+    active: dev
+  shell:
+    command:
+      version.enabled: true
+
+logging:
+  level:
+    root: info
+    org.springframework.shell: warn
+    com.kapresoft.devops.shell: info
