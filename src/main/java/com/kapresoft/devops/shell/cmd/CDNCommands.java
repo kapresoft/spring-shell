@@ -1,32 +1,16 @@
 package com.kapresoft.devops.shell.cmd;
 
-import lombok.SneakyThrows;
-import lombok.extern.log4j.Log4j2;
-
 import com.amazonaws.services.cloudfront.AmazonCloudFront;
 import com.amazonaws.services.cloudfront.AmazonCloudFrontClientBuilder;
-import com.amazonaws.services.cloudfront.model.AccessDeniedException;
-import com.amazonaws.services.cloudfront.model.DistributionConfig;
-import com.amazonaws.services.cloudfront.model.GetDistributionConfigRequest;
-import com.amazonaws.services.cloudfront.model.GetDistributionConfigResult;
-import com.amazonaws.services.cloudfront.model.NoSuchDistributionException;
-import com.amazonaws.services.cloudfront.model.Origin;
-import com.amazonaws.services.cloudfront.model.UpdateDistributionRequest;
+import com.amazonaws.services.cloudfront.model.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kapresoft.devops.shell.DefaultSettings;
-
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.SpringApplication;
-import org.springframework.core.env.Environment;
-import org.springframework.shell.CompletionContext;
-import org.springframework.shell.CompletionProposal;
+import lombok.SneakyThrows;
+import lombok.extern.log4j.Log4j2;
 import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
-import org.springframework.shell.standard.ValueProvider;
-import org.springframework.util.StringUtils;
 
-import java.util.List;
 import java.util.Optional;
 
 import static java.lang.String.format;
@@ -37,29 +21,31 @@ import static org.springframework.util.StringUtils.hasLength;
 public class CDNCommands {
 
 
-    private final Environment env;
+    private static final String INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG = "Invalid CloudFront distribution config returned: %s";
+
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
     private final AmazonCloudFront cloudFrontClient;
 
-    public CDNCommands(Environment env,
-                       ObjectMapper objectMapper,
+    public CDNCommands(ObjectMapper objectMapper,
                        DefaultSettings defaultSettings) {
-        this.env = env;
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
     }
 
+    /**
+     * @param distID The CloudFront Distribution-ID
+     * @return String Resolves to the Distribution-ID if {@code distID} is empty.
+     */
     private String resolveDistID(String distID) {
         var resolvedDistID = hasLength(distID) ? distID : defaultSettings.getDistributionID();
         log.info("DistID: {}", resolvedDistID);
         return resolvedDistID;
     }
 
-
     /**
-     * @param distID DistributionID
+     * @param distID The CloudFront Distribution-ID
      * @return DistributionConfig
      */
     private GetDistributionConfigResult getDistributionConfig(String distID) {
@@ -70,17 +56,19 @@ public class CDNCommands {
 
 
     /**
-     * <code>
-     * cdn E1ODOX7NPJ77SQ
-     * </code>
+     * <b>Usage:</b> cdn-get --dist {@code <Distribution-ID>};
+     * <pre>{@code
+     * shell:> cdn-get E1ODOX7NPJ77SQ
+     * shell:> cdn-get --dist E1ODOX7NPJ77SQ
+     * }</pre>
      *
-     * @param distIDArg
-     * @return String - Command output message
+     * @param optionalDistID The CloudFront Distribution ID
+     * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Upload file to CDN", key = "cdn")
-    public String cdnGetConfig(@ShellOption(value = "dist", defaultValue = "") String distIDArg) {
-        var distID = resolveDistID(distIDArg);
+    @ShellMethod(value = "Get CloudFront Distribution Config", key = "cdn-get")
+    public String cdnGetConfig(@ShellOption(value = "dist", defaultValue = "") String optionalDistID) {
+        var distID = resolveDistID(optionalDistID);
         if (!hasLength(distID)) {
             return "DistID was not resolved.";
         }
@@ -96,18 +84,19 @@ public class CDNCommands {
     }
 
     /**
-     * <code>
-     * cdn-update [distID] [path]
-     * cdn-update  E1ODOX7NPJ77SQ /live-2023-May-17-01
-     * </code>
+     * <b>Usage:</b> cdn-update-path {@code <distID> <path>}
+     * <pre>{@code
+     * shell:> cdn-update-path [distID] [path]
+     * shell:> cdn-update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
+     * }</pre>
      *
-     * @param distIDArg
-     * @param newPath
-     * @return
+     * @param distIDArg The CloudFront Distribution ID
+     * @param newPath The new path to set, i.e. '/new-path'
+     * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Upload file to CDN", key = "cdn-update")
-    public String cdnUpdatePath(@ShellOption(value = "dist", defaultValue = "E1ODOX7NPJ77SQ") String distIDArg,
+    @ShellMethod(value = "Update the CloudFront distribution origin path", key = "cdn-update-path")
+    public String cdnUpdatePath(@ShellOption(value = "dist", defaultValue = "") String distIDArg,
                                 @ShellOption(value = "path", help = "The new path value, i.e. '/live-123'") String newPath) {
         var distID = resolveDistID(distIDArg);
         GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
@@ -115,7 +104,7 @@ public class CDNCommands {
         DistributionConfig distConfig = distConfigResult.getDistributionConfig();
         Optional<Origin> origin = distConfig.getOrigins().getItems().stream().findFirst();
         if (origin.isEmpty()) {
-            return format("Invalid distribution config returned: %s", objectMapper.writeValueAsString(distConfig));
+            return format(INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG, objectMapper.writeValueAsString(distConfig));
         }
         origin.get().setOriginPath(newPath);
         UpdateDistributionRequest request = new UpdateDistributionRequest()
