@@ -14,7 +14,7 @@
 	<name>shell</name>
 	<description>Shell for Kapresoft Dev Ops</description>
 	<properties>
-		<java.version>20</java.version>
+		<java.version>17</java.version>
 		<spring-shell.version>3.0.3</spring-shell.version>
 	</properties>
 	<dependencies>

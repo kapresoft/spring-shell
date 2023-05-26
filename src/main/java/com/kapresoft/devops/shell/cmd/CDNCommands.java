@@ -20,8 +20,11 @@ import static org.springframework.util.StringUtils.hasLength;
 @ShellComponent
 public class CDNCommands {
 
-
     private static final String INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG = "Invalid CloudFront distribution config returned: %s";
+    private static final String PATH_HELP = "The CloudFront origin path, i.e. '/live-2023-05-25'";
+    private static final String DIST_HELP = "The CloudFront distribution ID, i.e. 'E1OAOW8NPJ78SQ' (Optional)." +
+            " Defaults to user env var AWS_CLOUDFRONT_DIST_ID.";
+    private static final String INVALID_DIST_ID_MSG = "CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]";
 
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
@@ -36,7 +39,7 @@ public class CDNCommands {
 
     /**
      * @param distID The CloudFront Distribution-ID
-     * @return String Resolves to the Distribution-ID if {@code distID} is empty.
+     * @return String Resolves to the DefaultSettings Distribution-ID if {@code distID} is empty.
      */
     private String resolveDistID(String distID) {
         var resolvedDistID = hasLength(distID) ? distID : defaultSettings.getDistributionID();
@@ -66,17 +69,20 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Get CloudFront Distribution Config", key = "get")
-    public String cdnGetConfig(@ShellOption(value = "dist", defaultValue = "") String optionalDistID) {
+    @ShellMethod(value = "Get CloudFront Distribution Config", key = "config")
+    public String getConfig(
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
+
         var distID = resolveDistID(optionalDistID);
         if (!hasLength(distID)) {
             return "DistID was not resolved.";
         }
+
         DistributionConfig result;
         try {
             result = getDistributionConfig(distID).getDistributionConfig();
         } catch (AccessDeniedException | NoSuchDistributionException e) {
-            return format("CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]",
+            return format(INVALID_DIST_ID_MSG,
                     distID, e.getErrorMessage(), e.getErrorCode(), e.getStatusCode());
         }
 
@@ -90,28 +96,72 @@ public class CDNCommands {
      * shell:> update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
      * }</pre>
      *
-     * @param distIDArg The CloudFront Distribution ID
+     * @param optionalDistID The CloudFront Distribution ID
      * @param newPath The new path to set, i.e. '/new-path'
      * @return String The command status message; if any.
      */
     @SneakyThrows
     @ShellMethod(value = "Update the CloudFront distribution origin path", key = "update-path")
-    public String cdnUpdatePath(@ShellOption(value = "dist", defaultValue = "") String distIDArg,
-                                @ShellOption(value = "path", help = "The new path value, i.e. '/live-123'") String newPath) {
-        var distID = resolveDistID(distIDArg);
+    public String updatePath(
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
+            @ShellOption(value = "path", help = PATH_HELP) String newPath) {
+
+        var distID = resolveDistID(optionalDistID);
         GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
 
         DistributionConfig distConfig = distConfigResult.getDistributionConfig();
         Optional<Origin> origin = distConfig.getOrigins().getItems().stream().findFirst();
         if (origin.isEmpty()) {
-            return format(INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG, objectMapper.writeValueAsString(distConfig));
+            return format(INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG,
+                    objectMapper.writeValueAsString(distConfig));
         }
+
         origin.get().setOriginPath(newPath);
         UpdateDistributionRequest request = new UpdateDistributionRequest()
                 .withId(distID)
                 .withIfMatch(distConfigResult.getETag())
                 .withDistributionConfig(distConfig);
         cloudFrontClient.updateDistribution(request);
+
+        return "Success";
+    }
+
+    /**
+     * <b>Usage:</b> invalidate-path {@code <distID> <path>}
+     * <pre>{@code
+     * shell:> update-path [distID] [path]
+     * shell:> update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
+     * }</pre>
+     *
+     * @param optionalDistID The CloudFront Distribution ID
+     * @param path The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc..
+     * @return String The command status message; if any.
+     */
+    @SneakyThrows
+    @ShellMethod(value = "Invalidate a CloudFront distribution path", key = "invalidate-path")
+    public String invalidatePath(
+            @ShellOption(value = "dist", help=DIST_HELP, defaultValue = "") String optionalDistID,
+            @ShellOption(value = "path", help = PATH_HELP) String path) {
+
+        var distID = resolveDistID(optionalDistID);
+
+        GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
+
+        DistributionConfig distConfig = distConfigResult.getDistributionConfig();
+        Optional<Origin> origin = distConfig.getOrigins().getItems().stream().findFirst();
+        if (origin.isEmpty()) {
+            return format(INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG,
+                    objectMapper.writeValueAsString(distConfig));
+        }
+
+        InvalidationBatch batch = new InvalidationBatch()
+                .withPaths(new Paths().withItems(path)
+                        .withQuantity(1))
+                .withCallerReference("spring-shell-aws");
+        CreateInvalidationRequest request = new CreateInvalidationRequest()
+                .withDistributionId(distID)
+                .withInvalidationBatch(batch);
+        cloudFrontClient.createInvalidation(request);
 
         return "Success";
     }
