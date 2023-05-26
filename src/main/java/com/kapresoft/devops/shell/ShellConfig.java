@@ -15,6 +15,11 @@ import java.util.Properties;
 public class ShellConfig {
 
     @Bean
+    ObjectMapper objectMapper() {
+        return new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
+    }
+
+    @Bean
     public PromptProvider promptProvider() {
         return () -> new AttributedString("cdn:> ", AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN));
     }
@@ -28,10 +33,5 @@ public class ShellConfig {
         p.setProperty("artifact", "shell-0.0.1-SNAPSHOT.jar");
 
         return new BuildProperties(p);
-    }
-
-    @Bean
-    ObjectMapper objectMapper() {
-        return new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
     }
 }
