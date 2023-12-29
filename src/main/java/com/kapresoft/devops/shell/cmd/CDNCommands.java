@@ -11,6 +11,7 @@ import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
 
+import java.util.Calendar;
 import java.util.Optional;
 
 import static java.lang.String.format;
@@ -21,7 +22,8 @@ import static org.springframework.util.StringUtils.hasLength;
 public class CDNCommands {
 
     private static final String INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG = "Invalid CloudFront distribution config returned: %s";
-    private static final String PATH_HELP = "The CloudFront origin path, i.e. '/live-2023-05-25'";
+    private static final String UPDATE_PATH_HELP = "The CloudFront origin path, i.e. '/live-2023-05-25'";
+    private static final String INVALIDATE_PATH_HELP = "The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc...";
     private static final String DIST_HELP = "The CloudFront distribution ID, i.e. 'E1OAOW8NPJ78SQ' (Optional)." +
             " Defaults to user env var AWS_CLOUDFRONT_DIST_ID.";
     private static final String INVALID_DIST_ID_MSG = "CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]";
@@ -90,21 +92,21 @@ public class CDNCommands {
     }
 
     /**
-     * <b>Usage:</b> update-path {@code <distID> <path>}
+     * <b>Usage:</b> update-path {@code <path> [distID]}
      * <pre>{@code
-     * shell:> update-path [distID] [path]
-     * shell:> update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
+     * shell:> update-path [path] [distID]
+     * shell:> update-path /live-2023-May-17-01 E1ODOX7NPJ77SQ
      * }</pre>
      *
-     * @param optionalDistID The CloudFront Distribution ID
+     * @param optionalDistID The CloudFront Distribution ID. Usually stored in env.
      * @param newPath The new path to set, i.e. '/new-path'
      * @return String The command status message; if any.
      */
     @SneakyThrows
     @ShellMethod(value = "Update the CloudFront distribution origin path", key = "update-path")
     public String updatePath(
-            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
-            @ShellOption(value = "path", help = PATH_HELP) String newPath) {
+            @ShellOption(value = "path", help = UPDATE_PATH_HELP) String newPath,
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
 
         var distID = resolveDistID(optionalDistID);
         GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
@@ -127,21 +129,24 @@ public class CDNCommands {
     }
 
     /**
-     * <b>Usage:</b> invalidate-path {@code <distID> <path>}
+     * <b>Usage:</b> invalidate-path {@code [distID] <path>}
      * <pre>{@code
-     * shell:> update-path [distID] [path]
-     * shell:> update-path  E1ODOX7NPJ77SQ /live-2023-May-17-01
+     * shell:> invalidate-path  [path] [distID]
+     * shell:> invalidate-path  --path [path] --dist [distID]
+     * shell:> invalidate-path  E1ODOX7NPJ77SQ /*
+     * shell:> invalidate-path  E1ODOX7NPJ77SQ /docs/*
+     * shell:> invalidate-path  E1ODOX7NPJ77SQ /img/*.jpg
      * }</pre>
      *
      * @param optionalDistID The CloudFront Distribution ID
-     * @param path The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc..
+     * @param path The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc...
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Invalidate a CloudFront distribution path", key = "invalidate-path")
+    @ShellMethod(value = "Invalidate a CloudFront distribution web path", key = "invalidate-path")
     public String invalidatePath(
-            @ShellOption(value = "dist", help=DIST_HELP, defaultValue = "") String optionalDistID,
-            @ShellOption(value = "path", help = PATH_HELP) String path) {
+            @ShellOption(value = "path", help = INVALIDATE_PATH_HELP) String path,
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
 
         var distID = resolveDistID(optionalDistID);
 
@@ -154,10 +159,12 @@ public class CDNCommands {
                     objectMapper.writeValueAsString(distConfig));
         }
 
+        String callerReference = "spring-shell-aws-" + Calendar.getInstance().getTimeInMillis();
+        log.info("Caller Reference: {}", callerReference);
         InvalidationBatch batch = new InvalidationBatch()
                 .withPaths(new Paths().withItems(path)
                         .withQuantity(1))
-                .withCallerReference("spring-shell-aws");
+                .withCallerReference(callerReference);
         CreateInvalidationRequest request = new CreateInvalidationRequest()
                 .withDistributionId(distID)
                 .withInvalidationBatch(batch);
