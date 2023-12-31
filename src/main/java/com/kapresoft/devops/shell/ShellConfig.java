@@ -2,6 +2,7 @@ package com.kapresoft.devops.shell;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+
 import org.jline.utils.AttributedString;
 import org.jline.utils.AttributedStyle;
 import org.springframework.boot.info.BuildProperties;
@@ -34,4 +35,5 @@ public class ShellConfig {
 
         return new BuildProperties(p);
     }
+
 }

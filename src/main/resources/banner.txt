@@ -3,4 +3,7 @@
 :: ${spring.application.title} (${spring.application.version})
 :: Active Profile(s): ${spring.profiles.active:}
 ::       Spring Boot: ${spring-boot.formatted-version}
+::
+::   ** Application Config **
+::      s3-bucket: ${spring.application.s3-bucket:}
 :: ---------------------------------------------
