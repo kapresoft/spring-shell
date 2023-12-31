@@ -7,6 +7,7 @@ import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.kapresoft.devops.shell.config.S3BucketProperties;
+import com.kapresoft.devops.shell.exception.service.NonUniqueResultException;
 import com.kapresoft.devops.shell.pojo.S3Bucket;
 
 import org.springframework.lang.NonNull;
@@ -14,10 +15,14 @@ import org.springframework.stereotype.Repository;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+
+import static java.util.Optional.empty;
+import static java.util.Optional.of;
 
 @Log4j2
 @Repository
@@ -32,8 +37,20 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
     }
 
     @Override
-    public List<S3ObjectSummary> findAll(Predicate<S3ObjectSummary> predicate,
-                                         Supplier<ListObjectsV2Request> requestSupplier) {
+    public Optional<S3ObjectSummary> find(@NonNull Predicate<S3ObjectSummary> predicate, @NonNull Supplier<ListObjectsV2Request> requestSupplier) {
+        final List<S3ObjectSummary> results = findAll(predicate, requestSupplier);
+        if (results.size() == 1) {
+            return of(results.get(0));
+        }
+        if (results.size() > 1) {
+            throw new NonUniqueResultException("S3ObjectSummary");
+        }
+        return empty();
+    }
+
+    @Override
+    public List<S3ObjectSummary> findAll(@NonNull Predicate<S3ObjectSummary> predicate,
+                                         @NonNull Supplier<ListObjectsV2Request> requestSupplier) {
         List<S3ObjectSummary> results = new ArrayList<>();
         findAll(predicate, requestSupplier, stream -> {
             List<S3ObjectSummary> found = stream.toList();
@@ -45,9 +62,9 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
     }
 
         @Override
-    public void findAll(Predicate<S3ObjectSummary> predicate,
-                         Supplier<ListObjectsV2Request> requestSupplier,
-                         Consumer<Stream<S3ObjectSummary>> streamConsumer) {
+    public void findAll(@NonNull Predicate<S3ObjectSummary> predicate,
+                         @NonNull Supplier<ListObjectsV2Request> requestSupplier,
+                         @NonNull Consumer<Stream<S3ObjectSummary>> streamConsumer) {
         ListObjectsV2Request request = requestSupplier.get();
 
         ListObjectsV2Result response;

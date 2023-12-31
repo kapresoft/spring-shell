@@ -1,5 +1,6 @@
 package com.kapresoft.devops.shell.cmd;
 
+import jakarta.validation.ValidationException;
 import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
 
@@ -45,6 +46,13 @@ public class CDNCommands {
             Defaults to user env var AWS_CLOUDFRONT_DIST_ID.
             """;
     private static final String INVALID_DIST_ID_MSG = "CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]";
+    private static final String RELEASE_VERSION_HELP = """
+            The build version in s3://{s3-bucket}/site/{version}. 
+            Example: 
+            release 2e641ee8-9226-45d4-ab8c-7850e731d675
+            release --version 2e641ee8-9226-45d4-ab8c-7850e731d675
+            """;
+    public static final String KAPRESOFT_ARTICLES = "Kapresoft-Articles";
 
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
@@ -99,7 +107,7 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Get CloudFront Distribution Config", key = "config")
+    @ShellMethod(value = "Get CloudFront Distribution Config", key = { "config", "conf" })
     public String getConfig(
             @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
             @ShellOption(value = "json", help = "Option to print full JSON config") boolean entireConfig) {
@@ -134,14 +142,60 @@ public class CDNCommands {
     }
 
     /**
-     * <b>Usage:</b> update-path {@code <path> [distID]}
-     * <pre>{@code
-     * shell:> update-path [path] [distID]
-     * shell:> update-path /live-2023-May-17-01 E1ODOX7NPJ77SQ
-     * }</pre>
-     *
+     * @param buildVersion The build version
      * @param optionalDistID The CloudFront Distribution ID. Usually stored in env.
+     * @return String The command status message; if any.
+     */
+    @SneakyThrows
+    @ShellMethod(value = "Release a build version", key = { "release", "rel" })
+    public String releaseVersion(
+            @ShellOption(value = "version", help = RELEASE_VERSION_HELP) String buildVersion,
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
+
+        // OriginPath requires a slash(/) first
+        String pathPrefix = "/" + resolvePathPrefixOrThrow(buildVersion);
+        log.info("Path prefix found: {}. Version is a valid candidate for release.", pathPrefix);
+
+        var distID = resolveDistID(optionalDistID);
+
+        GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
+
+        DistributionConfig distConfig = distConfigResult.getDistributionConfig();
+        Optional<Origin> origin = distConfig.getOrigins().getItems().stream().findFirst();
+        if (origin.isEmpty()) {
+            return format(INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG,
+                    objectMapper.writeValueAsString(distConfig));
+        }
+        origin.get().setOriginPath(pathPrefix);
+        UpdateDistributionRequest request = new UpdateDistributionRequest()
+                .withId(distID)
+                .withIfMatch(distConfigResult.getETag())
+                .withDistributionConfig(distConfig);
+        UpdateDistributionResult result = cloudFrontClient.updateDistribution(request);
+
+        return "Success; etag=%s".formatted(result.getETag());
+    }
+
+    private String resolvePathPrefixOrThrow(String buildVersion) {
+        String basePath = "site/%s/%s".formatted(buildVersion, KAPRESOFT_ARTICLES);
+        String comparePath = "%s/%s".formatted(basePath, "build.txt");
+        Optional<S3ObjectSummary> found = s3RepositoryService.find(
+                s3o -> {
+                    return s3o.getKey().equalsIgnoreCase(comparePath);
+                },
+                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix("site"));
+
+        found.ifPresent(s3ObjectSummary -> log.debug("Found match: {}", s3ObjectSummary));
+
+        if (found.isEmpty()) {
+            throw new ValidationException("Invalid build version: %s".formatted(buildVersion));
+        }
+        return basePath;
+    }
+
+    /**
      * @param newPath        The new path to set, i.e. '/new-path'
+     * @param optionalDistID The CloudFront Distribution ID. Usually stored in env.
      * @return String The command status message; if any.
      */
     @SneakyThrows
@@ -163,7 +217,9 @@ public class CDNCommands {
         String actualPath = resolvePath(newPath);
         validatePath(actualPath);
         log.info("Path resolved is: {}", actualPath);
-
+        if (true) {
+            return "Testing..";
+        }
         origin.get().setOriginPath(actualPath);
 
         UpdateDistributionRequest request = new UpdateDistributionRequest()
@@ -176,7 +232,7 @@ public class CDNCommands {
     }
 
     @SneakyThrows
-    @ShellMethod(value = "List valid sites", key = "ls-sites")
+    @ShellMethod(value = "List valid sites", key = { "ls-sites", "list-sites", "ls" })
     public String listSites() {
         final List<S3ObjectSummary> sites = s3RepositoryService.findAll(
                 s3 -> s3.getKey().endsWith("build.txt"), () -> new ListObjectsV2Request()
@@ -186,19 +242,19 @@ public class CDNCommands {
     }
 
     private void validatePath(String path) {
-        ListObjectsV2Request request = new ListObjectsV2Request().withBucketName(s3Bucket.name());
-        ListObjectsV2Result response = s3Client.listObjectsV2(request);
+        String comparePath = "%s/build.txt".formatted(path);
+        Optional<S3ObjectSummary> found = s3RepositoryService.find(
+                s3o -> {
+                    "".toString();
+                    return s3o.getKey().equalsIgnoreCase(comparePath);
+                },
+                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix("site"));
 
-        response.getObjectSummaries().stream().filter(p -> {
-            var key = p.getKey();
-            return key.startsWith("site") && key.endsWith("build.txt");
-        }).forEach(s -> {
-            System.out.printf("%s: %s%n", s.getKey(), s.getLastModified());
-        });
-        // Iterate through the object summaries and print their names
-        //for (S3ObjectSummary objectSummary : response.getObjectSummaries()) {
-        //    System.out.println("Object Key: " + objectSummary.getKey());
-        //}
+        found.ifPresent(s3ObjectSummary -> log.info("Found match: {}", s3ObjectSummary));
+
+        if (found.isEmpty()) {
+            throw new ValidationException("Invalid site path: %s".formatted(path));
+        }
     }
 
     /**
@@ -218,8 +274,8 @@ public class CDNCommands {
      */
     private String resolvePath(String path) {
         var p = path.replaceFirst(s3Bucket.uri(), "");
-        if (!p.startsWith("/")) {
-            p = "/" + p;
+        if (p.startsWith("/")) {
+            p = p.substring(1, p.length());
         }
         if (p.endsWith("/")) {
             p = p.substring(0, p.lastIndexOf("/"));
