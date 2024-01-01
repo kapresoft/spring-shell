@@ -9,25 +9,32 @@ import com.amazonaws.services.cloudfront.AmazonCloudFrontClientBuilder;
 import com.amazonaws.services.cloudfront.model.*;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
-import com.amazonaws.services.s3.model.ListObjectsV2Result;
+import com.amazonaws.services.s3.model.S3ObjectInputStream;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kapresoft.devops.shell.config.S3BucketProperties;
+import com.kapresoft.devops.shell.decorator.BuildInfoCLIOutputDecorator;
 import com.kapresoft.devops.shell.opt.DefaultSettings;
+import com.kapresoft.devops.shell.pojo.BuildInfo;
 import com.kapresoft.devops.shell.pojo.S3Bucket;
 import com.kapresoft.devops.shell.service.S3RepositoryService;
 
+import org.apache.commons.io.IOUtils;
+import org.springframework.core.convert.ConversionService;
 import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
 import org.springframework.util.StringUtils;
 
+import java.io.BufferedInputStream;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
 import java.util.Optional;
 
 import static java.lang.String.format;
+import static java.util.Optional.ofNullable;
 import static org.springframework.util.StringUtils.hasLength;
 
 @Log4j2
@@ -42,21 +49,24 @@ public class CDNCommands {
                s3://kapresoft/site/e97ef8e8-e5cb-43f8-af68-20b70c140119""";
     private static final String INVALIDATE_PATH_HELP = "The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc...";
     private static final String DIST_HELP = """
-            The CloudFront distribution ID, i.e. 'E1OAOW8NPJ78SQ' (Optional). 
+            The CloudFront distribution ID, i.e. 'E1OAOW8NPJ78SQ' (Optional).
             Defaults to user env var AWS_CLOUDFRONT_DIST_ID.
             """;
     private static final String INVALID_DIST_ID_MSG = "CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]";
     private static final String RELEASE_VERSION_HELP = """
-            The build version in s3://{s3-bucket}/site/{version}. 
-            Example: 
+            The build version in s3://{s3-bucket}/site/{version}.
+            Example:
             release 2e641ee8-9226-45d4-ab8c-7850e731d675
             release --version 2e641ee8-9226-45d4-ab8c-7850e731d675
             """;
-    public static final String KAPRESOFT_ARTICLES = "Kapresoft-Articles";
+    private static final String KAPRESOFT_ARTICLES = "Kapresoft-Articles";
+    private static final String BUILD_INFO_FILE_NAME = "build.yml";
+    private static final String SITE_PATH_NAME = "site";
 
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
     private final S3RepositoryService s3RepositoryService;
+    private final ConversionService conversionService;
     //private final CustomValidator validator;
     private final AmazonCloudFront cloudFrontClient;
 
@@ -64,11 +74,12 @@ public class CDNCommands {
     private final AmazonS3 s3Client;
 
     public CDNCommands(ObjectMapper objectMapper, DefaultSettings defaultSettings,
-                       S3RepositoryService s3RepositoryService,
+                       S3RepositoryService s3RepositoryService, ConversionService conversionService,
                        AmazonS3 s3Client, S3BucketProperties s3BucketProperties) {
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.s3RepositoryService = s3RepositoryService;
+        this.conversionService = conversionService;
         this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
         this.s3Client = s3Client;
         this.s3Bucket = s3BucketProperties.getS3Bucket();
@@ -178,12 +189,10 @@ public class CDNCommands {
 
     private String resolvePathPrefixOrThrow(String buildVersion) {
         String basePath = "site/%s/%s".formatted(buildVersion, KAPRESOFT_ARTICLES);
-        String comparePath = "%s/%s".formatted(basePath, "build.txt");
+        String comparePath = "%s/%s".formatted(basePath, BUILD_INFO_FILE_NAME);
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
-                s3o -> {
-                    return s3o.getKey().equalsIgnoreCase(comparePath);
-                },
-                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix("site"));
+                s3o -> s3o.getKey().equalsIgnoreCase(comparePath),
+                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
 
         found.ifPresent(s3ObjectSummary -> log.debug("Found match: {}", s3ObjectSummary));
 
@@ -217,9 +226,7 @@ public class CDNCommands {
         String actualPath = resolvePath(newPath);
         validatePath(actualPath);
         log.info("Path resolved is: {}", actualPath);
-        if (true) {
-            return "Testing..";
-        }
+
         origin.get().setOriginPath(actualPath);
 
         UpdateDistributionRequest request = new UpdateDistributionRequest()
@@ -232,25 +239,52 @@ public class CDNCommands {
     }
 
     @SneakyThrows
-    @ShellMethod(value = "List valid sites", key = { "ls-sites", "list-sites", "ls" })
+    @ShellMethod(value = "List valid sites", key = { "ls", "list" })
     public String listSites() {
         final List<S3ObjectSummary> sites = s3RepositoryService.findAll(
-                s3 -> s3.getKey().endsWith("build.txt"), () -> new ListObjectsV2Request()
-                        .withBucketName(s3Bucket.name()).withPrefix("site"));
+                s3 -> s3.getKey().endsWith(BUILD_INFO_FILE_NAME), () -> new ListObjectsV2Request()
+                        .withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
         log.info("sites: {}", sites.size());
-        return StringUtils.collectionToDelimitedString(sites, System.lineSeparator());
+        List<BuildInfoCLIOutputDecorator> output = new ArrayList<>(sites.size());
+        Optional<BuildInfo> liveBuildInfo = s3RepositoryService.getLiveBuildInfo();
+        log.debug("live: {}", liveBuildInfo);
+
+        sites.forEach(s3o -> {
+            try (S3ObjectInputStream is = s3Client.getObject(s3o.getBucketName(), s3o.getKey()).getObjectContent()) {
+                String content = IOUtils.toString(new InputStreamReader(new BufferedInputStream(is)));
+                var buildInfo = readBuildInfo(s3o, content, liveBuildInfo.orElse(null));
+                output.add(buildInfo);
+                //log.info("{}:\n {}", s3o.getKey(), buildInfo);
+            } catch (Exception e) {
+                log.error("Failed to read {}", s3o.getKey(), e);
+            }
+        });
+        String response = "";
+        if (!sites.isEmpty()) {
+            response += System.lineSeparator();
+            response += "CDN: %s%s".formatted(s3RepositoryService.getCdnURL(),  System.lineSeparator());
+            response += System.lineSeparator();
+        }
+        response += StringUtils.collectionToDelimitedString(output, System.lineSeparator());
+        return response;
+    }
+
+    private BuildInfoCLIOutputDecorator readBuildInfo(S3ObjectSummary summary, String text, BuildInfo buildInfoLive) {
+        var buildInfo = ofNullable(conversionService.convert(text, BuildInfo.class))
+                .orElseThrow(() -> new IllegalArgumentException("Failed to convert yaml text: %s".formatted(text)));
+        return BuildInfoCLIOutputDecorator.builder()
+                .summary(summary)
+                .buildInfo(buildInfo)
+                .buildInfoLive(buildInfoLive)
+                .build();
     }
 
     private void validatePath(String path) {
         String comparePath = "%s/build.txt".formatted(path);
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
-                s3o -> {
-                    "".toString();
-                    return s3o.getKey().equalsIgnoreCase(comparePath);
-                },
-                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix("site"));
-
-        found.ifPresent(s3ObjectSummary -> log.info("Found match: {}", s3ObjectSummary));
+                s3o -> s3o.getKey().equalsIgnoreCase(comparePath),
+                () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
+        found.ifPresent(s3ObjectSummary -> log.debug("Found match: {}", s3ObjectSummary));
 
         if (found.isEmpty()) {
             throw new ValidationException("Invalid site path: %s".formatted(path));
@@ -275,7 +309,7 @@ public class CDNCommands {
     private String resolvePath(String path) {
         var p = path.replaceFirst(s3Bucket.uri(), "");
         if (p.startsWith("/")) {
-            p = p.substring(1, p.length());
+            p = p.substring(1);
         }
         if (p.endsWith("/")) {
             p = p.substring(0, p.lastIndexOf("/"));
@@ -315,7 +349,7 @@ public class CDNCommands {
         }
 
         String callerReference = "spring-shell-aws-" + Calendar.getInstance().getTimeInMillis();
-        log.info("Caller Reference: {}", callerReference);
+        log.debug("Caller Reference: {}", callerReference);
         InvalidationBatch batch = new InvalidationBatch()
                 .withPaths(new Paths().withItems(path)
                         .withQuantity(1))

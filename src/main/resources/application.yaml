@@ -2,13 +2,20 @@ spring:
   application:
     title: KapreSoft CDN Spring Shell
     version: kapresoft-cdn-shell-1.0
+    code-build-project:
+      kapresoft-articles:
+        name: "Kapresoft-Articles"
+        build-info-file: "build.yml"
+        cdn: "https://d3prd97h59cxec.cloudfront.net"
     s3-bucket: s3://kapresoft/
   profiles:
     active: dev
   shell:
     command:
       version.enabled: true
-
+  main:
+    # web uses ConversionService
+    web-application-type: none
 logging:
   level:
     root: info

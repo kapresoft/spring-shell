@@ -4,4 +4,5 @@ logging:
     org.springframework.shell: warn
     com.kapresoft.devops.shell: info
   pattern:
-    console: "%clr([%4.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"
+    #console: "%clr([%4.15t]){faint} %clr(-%5p) %clr(%-40.40logger{39}){cyan} %C{1.} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"
+    console: "%clr([%4.15t]){faint} %clr(-%5p) %clr(%-20.30logger{0}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:%wEx}"
