@@ -24,7 +24,6 @@ public class KapresoftProjectProperties {
     @NonNull
     @Getter
     private final URI cdnURI;
-    @NonNull
     @Getter
     private S3Bucket s3Bucket;
 

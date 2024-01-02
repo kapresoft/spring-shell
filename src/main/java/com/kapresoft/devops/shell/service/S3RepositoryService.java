@@ -22,7 +22,7 @@ public interface S3RepositoryService {
 
     /**
      * @deprecated Don't use for now. I think all the info we need is in build.yml.
-     * @param buildInfo
+     * @param buildInfo Build Info
      */
     @Deprecated
     void updateReleaseInfo(@NonNull BuildInfoDetails buildInfo);

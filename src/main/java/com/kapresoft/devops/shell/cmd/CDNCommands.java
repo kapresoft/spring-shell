@@ -22,7 +22,6 @@ import com.kapresoft.devops.shell.service.S3RepositoryService;
 import org.apache.commons.io.IOUtils;
 import org.springframework.boot.ansi.AnsiColor;
 import org.springframework.boot.ansi.AnsiOutput;
-import org.springframework.core.convert.ConversionService;
 import org.springframework.shell.standard.ShellComponent;
 import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
@@ -67,20 +66,17 @@ public class CDNCommands {
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
     private final S3RepositoryService s3RepositoryService;
-    private final ConversionService conversionService;
-    //private final CustomValidator validator;
     private final AmazonCloudFront cloudFrontClient;
 
     private final S3Bucket s3Bucket;
     private final AmazonS3 s3Client;
 
     public CDNCommands(ObjectMapper objectMapper, DefaultSettings defaultSettings,
-                       S3RepositoryService s3RepositoryService, ConversionService conversionService,
+                       S3RepositoryService s3RepositoryService,
                        AmazonS3 s3Client, S3BucketProperties s3BucketProperties) {
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.s3RepositoryService = s3RepositoryService;
-        this.conversionService = conversionService;
         this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
         this.s3Client = s3Client;
         this.s3Bucket = s3BucketProperties.getS3Bucket();
