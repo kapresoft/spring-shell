@@ -11,6 +11,8 @@ spring:
   profiles:
     active: dev
   shell:
+    # default, dump
+    theme.name: default
     command:
       version.enabled: true
   main:

@@ -1,5 +1,7 @@
 package com.kapresoft.devops.shell.converter.http.message;
 
+import lombok.extern.log4j.Log4j2;
+
 import com.kapresoft.devops.shell.pojo.BuildInfo;
 
 import org.springframework.core.convert.converter.Converter;
@@ -12,8 +14,10 @@ import java.util.Map;
 
 import static java.util.Optional.of;
 
+@Log4j2
 @Component
 public class YamlTextToBuildInfoConverter implements Converter<String, BuildInfo> {
+
     @Override
     public BuildInfo convert(@NonNull String yamlText) {
         return of(yamlText)
