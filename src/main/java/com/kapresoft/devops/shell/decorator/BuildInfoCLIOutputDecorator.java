@@ -1,10 +1,10 @@
 package com.kapresoft.devops.shell.decorator;
 
 import lombok.Builder;
-import lombok.Value;
+import lombok.Getter;
+import lombok.Setter;
 
 import com.amazonaws.services.s3.model.S3ObjectSummary;
-import com.kapresoft.devops.shell.pojo.BuildInfo;
 import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
 
 import org.springframework.boot.ansi.AnsiColor;
@@ -13,27 +13,31 @@ import org.springframework.lang.NonNull;
 import org.springframework.lang.Nullable;
 import org.springframework.shell.style.FigureSettings;
 
-import static java.util.Optional.ofNullable;
+import java.util.Date;
 
-@Value
+@Getter
 public class BuildInfoCLIOutputDecorator {
 
     private static final String LIVE_TEXT_FMT = " %s [LIVE]";
-    S3ObjectSummary summary;
-    BuildInfoDetails buildInfo;
-    BuildInfoDetails buildInfoLive;
-    String bulletChar;
-    String rightPointing;
-     String checkMark;
+
+    private final S3ObjectSummary summary;
+    private final BuildInfoDetails buildInfo;
+    private final String bulletChar;
+    private final String rightPointing;
+    private final String checkMark;
+
+    @Setter
+    private boolean live;
 
     @Builder
     public BuildInfoCLIOutputDecorator(@NonNull S3ObjectSummary summary,
                                        @NonNull BuildInfoDetails buildInfo,
-                                       @Nullable BuildInfoDetails buildInfoLive) {
+                                       @Nullable boolean live) {
         this.summary = summary;
         this.buildInfo = buildInfo;
-        this.buildInfoLive = buildInfoLive;
-        FigureSettings fs = FigureSettings.defaults();
+        this.live = live;
+
+        final FigureSettings fs = FigureSettings.defaults();
         this.bulletChar = fs.righwardsArror();
         this.rightPointing = fs.rightPointingQuotation();
         this.checkMark = fs.tick();
@@ -44,9 +48,7 @@ public class BuildInfoCLIOutputDecorator {
         return "   %s %s: %s".formatted(bulletChar, formattedLabel, text);
     }
     private String live() {
-        String liveText = ofNullable(buildInfoLive).filter(live -> live.getId().equalsIgnoreCase(buildInfo.getId()))
-                .map(b -> AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, LIVE_TEXT_FMT.formatted(checkMark)))
-                .orElse("");
+        String liveText = isLive() ? AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, LIVE_TEXT_FMT.formatted(checkMark)) : "";
         return AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, liveText);
     }
 
@@ -58,7 +60,6 @@ public class BuildInfoCLIOutputDecorator {
 
     @Override
     public String toString() {
-        String liveText = live();
         return """
                 %s
                 %s
@@ -71,5 +72,9 @@ public class BuildInfoCLIOutputDecorator {
                 p("Date", buildInfo.getDate()), p("Git-Commit", buildInfo.getCommitHash()),
                 p("S3-URI", buildInfo.getS3URI())
         );
+    }
+
+    public Date getLastModified() {
+        return getBuildInfo().getLastModified();
     }
 }

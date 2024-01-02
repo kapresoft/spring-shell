@@ -1,6 +1,7 @@
 package com.kapresoft.devops.shell.service;
 
 import jakarta.annotation.Nonnull;
+import lombok.Getter;
 import lombok.extern.log4j.Log4j2;
 
 import com.amazonaws.SdkClientException;
@@ -10,26 +11,24 @@ import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.ObjectMetadata;
 import com.amazonaws.services.s3.model.S3Object;
-import com.amazonaws.services.s3.model.S3ObjectInputStream;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kapresoft.devops.shell.config.S3BucketProperties;
+import com.kapresoft.devops.shell.converter.http.message.BuildInfoConverter;
 import com.kapresoft.devops.shell.decorator.BuildInfoCLIOutputDecorator;
 import com.kapresoft.devops.shell.exception.service.NonUniqueResultException;
 import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
 import com.kapresoft.devops.shell.pojo.S3Bucket;
 
-import org.apache.commons.io.IOUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.convert.ConversionService;
+import org.springframework.core.convert.TypeDescriptor;
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Repository;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriComponentsBuilder;
 
-import java.io.BufferedInputStream;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -40,18 +39,21 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import static java.util.Collections.emptyList;
 import static java.util.Optional.*;
 
 @Log4j2
 @Repository
 public class DefaultS3RepositoryService implements S3RepositoryService {
 
+    private static final String BUILD_INFO_FILE_NAME = "build.yml";
+    private static final String SITE_PATH_NAME = "site";
+
     @Nonnull
+    @Getter
     private final AmazonS3 amazonS3;
     @Nonnull
     private final S3Bucket s3Bucket;
-    @Nonnull
-    private final RestTemplate restTemplate;
     @NonNull
     private final ConversionService conversionService;
     @NonNull
@@ -63,14 +65,12 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
 
     public DefaultS3RepositoryService(@NonNull AmazonS3 amazonS3,
                                       @NonNull S3BucketProperties s3BucketProperties,
-                                      @Nonnull RestTemplate restTemplate,
                                       @NonNull ConversionService conversionService,
                                       @NonNull ObjectMapper objectMapper,
                                       @NonNull @Value("${spring.application.code-build-project.kapresoft-articles.cdn}") URI cdnURL,
                                       @NonNull @Value("${spring.application.code-build-project.kapresoft-articles.build-info-file:build.yml}") String buildInfoFile) {
         this.amazonS3 = amazonS3;
         this.s3Bucket = s3BucketProperties.getS3Bucket();
-        this.restTemplate = restTemplate;
         this.conversionService = conversionService;
         this.objectMapper = objectMapper;
         this.cdnURI = cdnURL;
@@ -120,8 +120,7 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
         final URI buildInfoUri = UriComponentsBuilder.fromUri(cdnURI)
                 .path(buildInfoFile).build()
                 .toUri();
-        return ofNullable(restTemplate.getForObject(buildInfoUri, String.class))
-                .map(s -> conversionService.convert(s, BuildInfoDetails.class));
+        return ofNullable(conversionService.convert(buildInfoUri, BuildInfoDetails.class));
     }
 
     @Override
@@ -131,22 +130,8 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
         return BuildInfoCLIOutputDecorator.builder()
                 .summary(summary)
                 .buildInfo(buildInfo)
-                .buildInfoLive(buildInfoLive)
+                .live(true)
                 .build();
-    }
-
-    @Override
-    public BuildInfoDetails toBuildInfo(S3ObjectSummary summary) {
-        BuildInfoDetails buildInfo = null;
-        try (S3ObjectInputStream is = amazonS3.getObject(summary.getBucketName(), summary.getKey()).getObjectContent()) {
-            String content = IOUtils.toString(new InputStreamReader(new BufferedInputStream(is)));
-            buildInfo = ofNullable(conversionService.convert(content, BuildInfoDetails.class))
-                    .orElseThrow(() -> new IllegalArgumentException("Failed to convert yaml text: %s".formatted(content)));
-        } catch (Exception e) {
-            log.error("Failed to read {}", summary.getKey(), e);
-        }
-
-        return buildInfo;
     }
 
     @NonNull
@@ -193,4 +178,63 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
         } while (response.isTruncated());
     }
 
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<BuildInfoDetails> findAllBuilds() {
+
+        final List<S3ObjectSummary> sites = findAll(
+                s3 -> s3.getKey().endsWith(BUILD_INFO_FILE_NAME), () -> new ListObjectsV2Request()
+                        .withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
+        if (sites.isEmpty()) {
+            return emptyList();
+        }
+
+        TypeDescriptor sourceType = TypeDescriptor.collection(List.class, TypeDescriptor.valueOf(S3ObjectSummary.class));
+        TypeDescriptor targetType = TypeDescriptor.collection(List.class, TypeDescriptor.valueOf(BuildInfoDetails.class));
+        return (List<BuildInfoDetails>) conversionService.convert(sites, sourceType, targetType);
+    }
+
+    public List<BuildInfoCLIOutputDecorator> findAllBuildsAsDecorators() {
+        return findAllBuildsAsDecorators(null);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public List<BuildInfoCLIOutputDecorator> findAllBuildsAsDecorators(Consumer<BuildInfoCLIOutputDecorator> consumer) {
+        final List<S3ObjectSummary> sites = findAll(
+                s3 -> s3.getKey().endsWith(BUILD_INFO_FILE_NAME), () -> new ListObjectsV2Request()
+                        .withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
+        if (sites.isEmpty()) {
+            return emptyList();
+        }
+
+        TypeDescriptor sourceType = TypeDescriptor.collection(List.class, TypeDescriptor.valueOf(S3ObjectSummary.class));
+        TypeDescriptor targetType = TypeDescriptor.collection(List.class, TypeDescriptor.valueOf(BuildInfoCLIOutputDecorator.class));
+        final List<BuildInfoCLIOutputDecorator> builds = (List<BuildInfoCLIOutputDecorator>) conversionService.convert(sites, sourceType, targetType);
+
+        if (ofNullable(builds).isPresent()) {
+            builds.sort(BuildInfoConverter.ASCENDING_ORDER_COMPARATOR);
+        }
+
+        if (ofNullable(builds).isEmpty() || ofNullable(consumer).isEmpty()) {
+            return builds;
+        }
+
+        builds.forEach(consumer);
+        return builds;
+    }
+
+    @Override
+    public boolean isLive(@NonNull BuildInfoDetails buildInfo, @Nullable BuildInfoDetails buildInfoLive) {
+        return ofNullable(buildInfoLive)
+                .filter(live -> live.getId().equalsIgnoreCase(buildInfo.getId()))
+                .isPresent();
+    }
+
+    @NonNull
+    @Override
+    public Optional<BuildInfoDetails> toBuildInfo(S3ObjectSummary summary) {
+        //BuildInfoDetails buildInfo = null;
+        return ofNullable(conversionService.convert(summary, BuildInfoDetails.class));
+    }
 }

@@ -7,9 +7,7 @@ import lombok.extern.log4j.Log4j2;
 import com.amazonaws.services.cloudfront.AmazonCloudFront;
 import com.amazonaws.services.cloudfront.AmazonCloudFrontClientBuilder;
 import com.amazonaws.services.cloudfront.model.*;
-import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
-import com.amazonaws.services.s3.model.S3ObjectInputStream;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.kapresoft.devops.shell.config.S3BucketProperties;
@@ -19,7 +17,6 @@ import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
 import com.kapresoft.devops.shell.pojo.S3Bucket;
 import com.kapresoft.devops.shell.service.S3RepositoryService;
 
-import org.apache.commons.io.IOUtils;
 import org.springframework.boot.ansi.AnsiColor;
 import org.springframework.boot.ansi.AnsiOutput;
 import org.springframework.shell.standard.ShellComponent;
@@ -27,8 +24,6 @@ import org.springframework.shell.standard.ShellMethod;
 import org.springframework.shell.standard.ShellOption;
 import org.springframework.util.StringUtils;
 
-import java.io.BufferedInputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.List;
@@ -62,6 +57,7 @@ public class CDNCommands {
     private static final String KAPRESOFT_ARTICLES = "Kapresoft-Articles";
     private static final String BUILD_INFO_FILE_NAME = "build.yml";
     private static final String SITE_PATH_NAME = "site";
+    private static final String INVALIDATE_MESSAGE = "Don't forget to invalidate-path on /*";
 
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
@@ -69,16 +65,15 @@ public class CDNCommands {
     private final AmazonCloudFront cloudFrontClient;
 
     private final S3Bucket s3Bucket;
-    private final AmazonS3 s3Client;
 
-    public CDNCommands(ObjectMapper objectMapper, DefaultSettings defaultSettings,
+    public CDNCommands(ObjectMapper objectMapper,
+                       DefaultSettings defaultSettings,
                        S3RepositoryService s3RepositoryService,
-                       AmazonS3 s3Client, S3BucketProperties s3BucketProperties) {
+                       S3BucketProperties s3BucketProperties) {
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.s3RepositoryService = s3RepositoryService;
         this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
-        this.s3Client = s3Client;
         this.s3Bucket = s3BucketProperties.getS3Bucket();
         log.info("S3 Bucket is: {}", this.s3Bucket);
     }
@@ -181,7 +176,7 @@ public class CDNCommands {
                 .withDistributionConfig(distConfig);
         UpdateDistributionResult result = cloudFrontClient.updateDistribution(request);
 
-        return "Success; etag=%s".formatted(result.getETag());
+        return "Success; etag=%s%s".formatted(result.getETag(), INVALIDATE_MESSAGE);
     }
 
     /**
@@ -194,7 +189,7 @@ public class CDNCommands {
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
                 s3o -> s3o.getKey().equalsIgnoreCase(comparePath),
                 () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
-        return found.map(s3RepositoryService::toBuildInfo)
+        return found.flatMap(s3RepositoryService::toBuildInfo)
                 .orElseThrow(() -> new ValidationException("Invalid build version: %s".formatted(buildVersion)));
     }
 
@@ -237,31 +232,24 @@ public class CDNCommands {
     @SneakyThrows
     @ShellMethod(value = "List valid sites", key = {"ls", "list"})
     public String listSites() {
-        final List<S3ObjectSummary> sites = s3RepositoryService.findAll(
-                s3 -> s3.getKey().endsWith(BUILD_INFO_FILE_NAME), () -> new ListObjectsV2Request()
-                        .withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
-        log.info("sites: {}", sites.size());
-        List<BuildInfoCLIOutputDecorator> output = new ArrayList<>(sites.size());
-        Optional<BuildInfoDetails> liveBuildInfo = s3RepositoryService.getLiveBuildInfo();
+        List<BuildInfoCLIOutputDecorator> output = new ArrayList<>();
+        BuildInfoDetails liveBuildInfo = s3RepositoryService.getLiveBuildInfo().orElse(null);
         log.debug("live: {}", liveBuildInfo);
 
-        sites.forEach(s3o -> {
-            try (S3ObjectInputStream is = s3Client.getObject(s3o.getBucketName(), s3o.getKey()).getObjectContent()) {
-                String content = IOUtils.toString(new InputStreamReader(new BufferedInputStream(is)));
-                var buildInfo = s3RepositoryService.toBuildInfoDecorator(s3o, content, liveBuildInfo.orElse(null));
-                output.add(buildInfo);
-            } catch (Exception e) {
-                log.error("Failed to read {}", s3o.getKey(), e);
-            }
+        s3RepositoryService.findAllBuildsAsDecorators(b -> {
+            boolean isLive = s3RepositoryService.isLive(b.getBuildInfo(), liveBuildInfo);
+            b.setLive(isLive);
+            output.add(b);
         });
-        String response = "";
-        if (!sites.isEmpty()) {
-            response += System.lineSeparator();
-            response += "CDN: %s%s".formatted(s3RepositoryService.getCdnURI(), System.lineSeparator());
-            response += System.lineSeparator();
+
+        final StringBuilder response = new StringBuilder();
+        if (!output.isEmpty()) {
+            response.append(System.lineSeparator());
+            response.append("CDN: %s%s".formatted(s3RepositoryService.getCdnURI(), System.lineSeparator()));
+            response.append(System.lineSeparator());
         }
-        response += StringUtils.collectionToDelimitedString(output, System.lineSeparator());
-        return AnsiOutput.toString(AnsiColor.BRIGHT_WHITE, response);
+        response.append(StringUtils.collectionToDelimitedString(output, System.lineSeparator()));
+        return AnsiOutput.toString(AnsiColor.BRIGHT_WHITE, response.toString());
     }
 
     private void validatePath(String path) {
@@ -344,7 +332,7 @@ public class CDNCommands {
                 .withInvalidationBatch(batch);
         cloudFrontClient.createInvalidation(request);
 
-        return "Success";
+        return "Success; cache-invalidated=%s".formatted(path);
     }
 
 }

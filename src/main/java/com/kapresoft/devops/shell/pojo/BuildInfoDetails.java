@@ -8,8 +8,10 @@ import com.kapresoft.devops.shell.config.KapresoftProjectProperties;
 import org.springframework.lang.NonNull;
 
 import java.net.URI;
+import java.util.Date;
 
 @Value
+@SuppressWarnings("unused")
 public class BuildInfoDetails {
 
     KapresoftProjectProperties projectConfig;
@@ -35,6 +37,10 @@ public class BuildInfoDetails {
         this.s3URI = s3URI;
         this.cdnPath = cdnPath;
         this.buildInfoFileURI = buildInfoFileURI;
+    }
+
+    public Date getLastModified() {
+        return getBuildInfo().getLastModified();
     }
 
     @NonNull

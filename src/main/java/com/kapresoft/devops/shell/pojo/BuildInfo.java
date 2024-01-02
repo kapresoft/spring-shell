@@ -4,6 +4,9 @@ import lombok.Builder;
 import lombok.Value;
 
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
+
+import java.util.Date;
 
 @Value
 public class BuildInfo {
@@ -14,14 +17,17 @@ public class BuildInfo {
     String id;
     String date;
     String commitHash;
+    Date lastModified;
 
     @Builder(toBuilder = true)
     public BuildInfo(@NonNull String id,
                      @NonNull String date,
-                     @NonNull String commitHash) {
+                     @NonNull String commitHash,
+                     @Nullable Date lastModified) {
         this.date = date;
         this.id = id;
         this.commitHash = commitHash;
+        this.lastModified = lastModified;
     }
 
 }
