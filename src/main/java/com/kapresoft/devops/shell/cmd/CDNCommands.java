@@ -10,7 +10,7 @@ import com.amazonaws.services.cloudfront.model.*;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.kapresoft.devops.shell.config.S3BucketProperties;
+import com.kapresoft.devops.shell.config.KapresoftProjectProperties;
 import com.kapresoft.devops.shell.decorator.BuildInfoCLIOutputDecorator;
 import com.kapresoft.devops.shell.opt.DefaultSettings;
 import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
@@ -54,8 +54,6 @@ public class CDNCommands {
             release 2e641ee8-9226-45d4-ab8c-7850e731d675
             release --version 2e641ee8-9226-45d4-ab8c-7850e731d675
             """;
-    private static final String KAPRESOFT_ARTICLES = "Kapresoft-Articles";
-    private static final String BUILD_INFO_FILE_NAME = "build.yml";
     private static final String SITE_PATH_NAME = "site";
     private static final String INVALIDATE_MESSAGE = "Don't forget to invalidate-path on /*";
 
@@ -65,16 +63,18 @@ public class CDNCommands {
     private final AmazonCloudFront cloudFrontClient;
 
     private final S3Bucket s3Bucket;
+    private final String buildInfoFile;
 
     public CDNCommands(ObjectMapper objectMapper,
                        DefaultSettings defaultSettings,
                        S3RepositoryService s3RepositoryService,
-                       S3BucketProperties s3BucketProperties) {
+                       KapresoftProjectProperties projectConf) {
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.s3RepositoryService = s3RepositoryService;
         this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
-        this.s3Bucket = s3BucketProperties.getS3Bucket();
+        this.s3Bucket = projectConf.getS3Bucket();
+        this.buildInfoFile = projectConf.getBuildInfoFile();
         log.info("S3 Bucket is: {}", this.s3Bucket);
     }
 
@@ -153,11 +153,17 @@ public class CDNCommands {
     @ShellMethod(value = "Release a build version", key = {"release", "rel"})
     public String releaseVersion(
             @ShellOption(value = "version", help = RELEASE_VERSION_HELP) String buildVersion,
-            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
+            @ShellOption(value = "dryRun", help = "Dry Run, no executions", defaultValue = "true") boolean isDryRun) {
 
         final BuildInfoDetails buildInfo = findBuildInfoOrThrow(buildVersion);
         String pathPrefix = buildInfo.getCdnPath();
         log.info("CDN Path found: {}. Version is a valid candidate for release.", pathPrefix);
+
+        if (isDryRun) {
+            log.info("PathPrefix to deploy: {}", pathPrefix);
+            return "Success; DryRun=true";
+        }
 
         var distID = resolveDistID(optionalDistID);
 
@@ -184,10 +190,9 @@ public class CDNCommands {
      * @return String site/{build-version}/{project-name}
      */
     private BuildInfoDetails findBuildInfoOrThrow(String buildVersion) {
-        String basePath = "site/%s/%s".formatted(buildVersion, KAPRESOFT_ARTICLES);
-        String comparePath = "%s/%s".formatted(basePath, BUILD_INFO_FILE_NAME);
+        String basePath = "site/%s".formatted(buildVersion);
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
-                s3o -> s3o.getKey().equalsIgnoreCase(comparePath),
+                s3o -> s3o.getKey().startsWith(basePath) && s3o.getKey().endsWith(buildInfoFile),
                 () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
         return found.flatMap(s3RepositoryService::toBuildInfo)
                 .orElseThrow(() -> new ValidationException("Invalid build version: %s".formatted(buildVersion)));

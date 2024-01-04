@@ -69,4 +69,16 @@ public class BuildInfoDetails {
     public String getCommitHash() {
         return getBuildInfo().getCommitHash();
     }
+
+    public Date getBuildDate() {
+        return getBuildInfo().getBuildDate();
+    }
+
+    public String getBuildNumber() {
+        return getBuildInfo().getBuildNumber();
+    }
+
+    public String getDeployKey() {
+        return getBuildInfo().getDeployKey();
+    }
 }

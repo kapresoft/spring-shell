@@ -15,6 +15,8 @@ import org.springframework.shell.style.FigureSettings;
 
 import java.util.Date;
 
+import static java.util.Optional.ofNullable;
+
 @Getter
 public class BuildInfoCLIOutputDecorator {
 
@@ -43,9 +45,14 @@ public class BuildInfoCLIOutputDecorator {
         this.checkMark = fs.tick();
     }
 
-    private String p(String label, Object text) {
+    private String p(String label, Object text, boolean... noBulletChar) {
         String formattedLabel = AnsiOutput.toString(AnsiColor.YELLOW, label);
-        return "   %s %s: %s".formatted(bulletChar, formattedLabel, text);
+        boolean optUseBullet = ofNullable(noBulletChar).filter(vararg -> vararg.length > 0)
+                .map(v -> noBulletChar[0]).orElse(false);
+        if (optUseBullet) {
+            return "  %-20s: %s".formatted(formattedLabel, text);
+        }
+        return " %s %22s: %s".formatted(bulletChar, formattedLabel, text);
     }
     private String live() {
         String liveText = isLive() ? AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, LIVE_TEXT_FMT.formatted(checkMark)) : "";
@@ -60,16 +67,16 @@ public class BuildInfoCLIOutputDecorator {
 
     @Override
     public String toString() {
+        var buildDate = ofNullable(buildInfo.getBuildDate())
+                .map(d -> buildInfo.getBuildDate().toString())
+                .orElse("Undetermined");
         return """
                 %s
-                %s
-                %s
-                %s
+                %s %s
                 %s
                 """.formatted(
                 header(),
-                p("ID", buildInfo.getId()),
-                p("Date", buildInfo.getDate()), p("Git-Commit", buildInfo.getCommitHash()),
+                p("Git-Hash", buildInfo.getCommitHash()), p("Build-Date", buildDate, true),
                 p("S3-URI", buildInfo.getS3URI())
         );
     }

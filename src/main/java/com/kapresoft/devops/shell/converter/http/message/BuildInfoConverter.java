@@ -1,5 +1,6 @@
 package com.kapresoft.devops.shell.converter.http.message;
 
+import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.kapresoft.devops.shell.config.KapresoftProjectProperties;
 import com.kapresoft.devops.shell.decorator.BuildInfoCLIOutputDecorator;
 import com.kapresoft.devops.shell.pojo.BuildInfo;
@@ -7,14 +8,13 @@ import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
 
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.lang.NonNull;
+import org.springframework.lang.Nullable;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UriComponentsBuilder;
-import org.yaml.snakeyaml.Yaml;
 
 import java.net.URI;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.Map;
 import java.util.Optional;
 
 import static java.util.Optional.*;
@@ -37,11 +37,18 @@ public interface BuildInfoConverter<S, T> extends Converter<S, T> {
     default Optional<BuildInfo> toBuildInfo(@NonNull String yamlText, Date lastModified) {
         return of(yamlText)
                 .filter(StringUtils::hasLength)
-                .map(s -> fromText(s).toBuilder().lastModified(lastModified).build());
+                .map(s -> {
+                    BuildInfo.BuildInfoBuilder builder = YamlTextToBuildInfoConverter.fromText(s)
+                            .toBuilder();
+                    if (ofNullable(lastModified).isPresent()) {
+                        builder.lastModified(lastModified);
+                    }
+                    return builder.build();
+                });
     }
 
-    default Optional<BuildInfoDetails> toBuildInfoDetails(@NonNull String yamlText, Date lastModified, KapresoftProjectProperties projectConfig) {
-
+    default Optional<BuildInfoDetails> toBuildInfoDetails(@NonNull String yamlText, @Nullable S3ObjectSummary s3o, KapresoftProjectProperties projectConfig) {
+        Date lastModified = ofNullable(s3o).map(S3ObjectSummary::getLastModified).orElse(null);
         Optional<BuildInfo> buildInfo = toBuildInfo(yamlText, lastModified);
         if (buildInfo.isEmpty()) {
             return empty();
@@ -50,10 +57,13 @@ public interface BuildInfoConverter<S, T> extends Converter<S, T> {
         BuildInfo b = buildInfo.get();
         URI buildInfoFileURI = toBuildInfoFileURI(projectConfig);
 
+        String buildFile = "/" + projectConfig.getBuildInfoFile();
         String version = getBuildVersion(b.getId());
-        String keyPath = KEY_PATH_FMT.formatted(version, projectConfig.getName());
+        String keyPath = ofNullable(s3o)
+                .map( s -> s.getKey().replaceFirst(buildFile, ""))
+                .orElse(KEY_PATH_FMT.formatted(version, projectConfig.getName()));
         String cdnPath = "/" + keyPath;
-        URI s3URI = URI.create(S3_URI_FMT.formatted(projectConfig.getName(), keyPath));
+        URI s3URI = URI.create(S3_URI_FMT.formatted(projectConfig.getS3Bucket().name(), keyPath));
 
         return of(BuildInfoDetails.builder()
                 .buildInfo(b)
@@ -63,19 +73,6 @@ public interface BuildInfoConverter<S, T> extends Converter<S, T> {
                 .s3URI(s3URI)
                 .buildInfoFileURI(buildInfoFileURI)
                 .build());
-    }
-
-    default BuildInfo fromText(String yamlText) {
-        final Yaml yaml = new Yaml();
-        return fromMap(yaml.load(yamlText));
-    }
-
-    default BuildInfo fromMap(Map<String, Object> map) {
-        return BuildInfo.builder()
-                .id((String) map.get("id"))
-                .date((String) map.get("date"))
-                .commitHash((String) map.get("commit-hash"))
-                .build();
     }
 
     default URI toBuildInfoFileURI(KapresoftProjectProperties projectConfig) {

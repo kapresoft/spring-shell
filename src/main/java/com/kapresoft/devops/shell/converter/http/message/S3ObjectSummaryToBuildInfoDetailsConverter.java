@@ -17,7 +17,6 @@ import org.springframework.stereotype.Component;
 import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.util.Date;
 
 @Log4j2
 @Component
@@ -36,8 +35,7 @@ public class S3ObjectSummaryToBuildInfoDetailsConverter implements BuildInfoConv
         KapresoftProjectProperties projConf = ctx.getBean(KapresoftProjectProperties.class);
         try (S3ObjectInputStream is = amazonS3.getObject(s3o.getBucketName(), s3o.getKey()).getObjectContent()) {
             String yamlText = IOUtils.toString(new InputStreamReader(new BufferedInputStream(is)));
-            Date lastModified = s3o.getLastModified();
-            return toBuildInfoDetails(yamlText, lastModified, projConf).orElse(null);
+            return toBuildInfoDetails(yamlText, s3o, projConf).orElse(null);
         } catch (AmazonS3Exception | IOException e) {
             log.error("Failed to read {}", s3o.getKey(), e);
             throw new IllegalStateException("Exception while reading build info[%s]: %s".formatted(s3o.getKey(), e.getMessage()), e);
