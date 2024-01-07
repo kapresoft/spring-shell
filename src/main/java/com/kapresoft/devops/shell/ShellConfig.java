@@ -11,9 +11,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.context.support.ConversionServiceFactoryBean;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.shell.jline.PromptProvider;
-import org.springframework.shell.style.FigureSettings;
-import org.springframework.shell.style.Theme;
-import org.springframework.shell.style.ThemeSettings;
 import org.springframework.web.client.RestTemplate;
 
 import java.util.Properties;
@@ -22,6 +19,7 @@ import java.util.Set;
 /**
  * @see <a href="https://docs.spring.io/spring-shell/docs/3.1.6/docs/">Spring Shell Reference Doc</a>
  */
+@SuppressWarnings("rawtypes")
 @Configuration
 public class ShellConfig {
 
@@ -38,35 +36,6 @@ public class ShellConfig {
                         .foreground(AttributedStyle.GREEN)
         );
     }
-
-
-//    @Bean
-//    Theme myTheme() {
-//        return new Theme() {
-//            @Override
-//            public String getName() {
-//                return "kapresoft-default";
-//            }
-//
-//            @Override
-//            public ThemeSettings getSettings() {
-//                FigureSettings figureSettings = new FigureSettings() {
-//                    @Override
-//                    public String error() {
-//                        return super.error();
-//                    }
-//                };
-//                ThemeSettings defaults = new ThemeSettings() {
-//                    @Override
-//                    public FigureSettings figures() {
-//                        return figureSettings;
-//                    }
-//                };
-//
-//                return defaults;
-//            }
-//        };
-//    }
 
     @Bean
     BuildProperties buildProperties() {
