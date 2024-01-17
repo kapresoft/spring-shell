@@ -5,8 +5,15 @@ import lombok.SneakyThrows;
 import lombok.extern.log4j.Log4j2;
 
 import com.amazonaws.services.cloudfront.AmazonCloudFront;
-import com.amazonaws.services.cloudfront.AmazonCloudFrontClientBuilder;
-import com.amazonaws.services.cloudfront.model.*;
+import com.amazonaws.services.cloudfront.model.CreateInvalidationRequest;
+import com.amazonaws.services.cloudfront.model.DistributionConfig;
+import com.amazonaws.services.cloudfront.model.GetDistributionConfigRequest;
+import com.amazonaws.services.cloudfront.model.GetDistributionConfigResult;
+import com.amazonaws.services.cloudfront.model.InvalidationBatch;
+import com.amazonaws.services.cloudfront.model.Origin;
+import com.amazonaws.services.cloudfront.model.Paths;
+import com.amazonaws.services.cloudfront.model.UpdateDistributionRequest;
+import com.amazonaws.services.cloudfront.model.UpdateDistributionResult;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -14,7 +21,9 @@ import com.kapresoft.devops.shell.config.KapresoftProjectProperties;
 import com.kapresoft.devops.shell.decorator.BuildInfoCLIOutputDecorator;
 import com.kapresoft.devops.shell.opt.DefaultSettings;
 import com.kapresoft.devops.shell.pojo.BuildInfoDetails;
+import com.kapresoft.devops.shell.pojo.DistributionConfigData;
 import com.kapresoft.devops.shell.pojo.S3Bucket;
+import com.kapresoft.devops.shell.service.CDNService;
 import com.kapresoft.devops.shell.service.S3RepositoryService;
 
 import org.springframework.boot.ansi.AnsiColor;
@@ -39,15 +48,17 @@ public class CDNCommands {
     private static final String INVALID_CLOUD_FRONT_DISTRIBUTION_CONFIG_MSG = "Invalid CloudFront distribution config returned: %s";
     private static final String UPDATE_PATH_HELP = """
             The full S3 URI to the new site or S3 sub-path. The end path slash(/) is not needed.
-            Examples Paths:
-               /live-2023-05-25 or\s
-               s3://kapresoft/site/e97ef8e8-e5cb-43f8-af68-20b70c140119""";
+            Full Paths:
+               s3://kapresoft/site/build-2024-Jan-16
+               s3://kapresoft/site/76430603-5232-4722-ab25-74d975af8199/63b48b9203e1482acfeb7bb5df1c4791ba58b522
+            or SubPaths:
+               site/76430603-5232-4722-ab25-74d975af8199/63b48b9203e1482acfeb7bb5df1c4791ba58b522 or\s
+               site/build-2024-Jan-16""";
     private static final String INVALIDATE_PATH_HELP = "The CDN web path to invalidate, i.e. '/docs/*' or '/images/*', or '/*', etc...";
     private static final String DIST_HELP = """
             The CloudFront distribution ID, i.e. 'E1OAOW8NPJ78SQ' (Optional).
             Defaults to user env var AWS_CLOUDFRONT_DIST_ID.
             """;
-    private static final String INVALID_DIST_ID_MSG = "CDN with distID[%s] failed with: %s%n  code=[%s] status=[%s]";
     private static final String RELEASE_VERSION_HELP = """
             The build version in s3://{s3-bucket}/site/{version}.
             Example:
@@ -56,10 +67,13 @@ public class CDNCommands {
             """;
     private static final String SITE_PATH_NAME = "site";
     private static final String INVALIDATE_MESSAGE = "Don't forget to invalidate-path on /*";
+    private static final String CDN_ORIGINS_URL_FORMAT = "https://us-east-1.console.aws.amazon.com/cloudfront/v4/home?region=us-east-1#/distributions/%s/origins";
+    private static final String S3_URL_FORMAT = "https://s3.console.aws.amazon.com/s3/buckets/kapresoft%s/";
 
     private final ObjectMapper objectMapper;
     private final DefaultSettings defaultSettings;
     private final S3RepositoryService s3RepositoryService;
+    private final CDNService cdnService;
     private final AmazonCloudFront cloudFrontClient;
 
     private final S3Bucket s3Bucket;
@@ -68,11 +82,14 @@ public class CDNCommands {
     public CDNCommands(ObjectMapper objectMapper,
                        DefaultSettings defaultSettings,
                        S3RepositoryService s3RepositoryService,
+                       CDNService cdnService,
+                       AmazonCloudFront cloudFrontClient,
                        KapresoftProjectProperties projectConf) {
         this.objectMapper = objectMapper;
         this.defaultSettings = defaultSettings;
         this.s3RepositoryService = s3RepositoryService;
-        this.cloudFrontClient = AmazonCloudFrontClientBuilder.defaultClient();
+        this.cdnService = cdnService;
+        this.cloudFrontClient = cloudFrontClient;
         this.s3Bucket = projectConf.getS3Bucket();
         this.buildInfoFile = projectConf.getBuildInfoFile();
         log.info("S3 Bucket is: {}", this.s3Bucket);
@@ -110,37 +127,31 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Get CloudFront Distribution Config", key = {"config", "conf"})
+    @ShellMethod(value = "Get CloudFront Distribution Config", key = { "config", "conf", "c" })
     public String getConfig(
             @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
             @ShellOption(value = "json", help = "Option to print full JSON config") boolean entireConfig) {
 
-        var distID = resolveDistID(optionalDistID);
-        if (!hasLength(distID)) {
-            return "DistID was not resolved.";
+        DistributionConfigData configData = cdnService.getDistributionConfig(optionalDistID);
+        Optional<Origin> firstOrigin = configData.getFirstOrigin();
+        if (entireConfig || firstOrigin.isEmpty()) {
+            return objectMapper.writeValueAsString(configData.getDistConfig());
         }
 
-        DistributionConfig result;
-        try {
-            result = getDistributionConfig(distID).getDistributionConfig();
-        } catch (AccessDeniedException | NoSuchDistributionException e) {
-            return format(INVALID_DIST_ID_MSG,
-                    distID, e.getErrorMessage(), e.getErrorCode(), e.getStatusCode());
-        }
-
-        if (entireConfig) {
-            return objectMapper.writeValueAsString(result);
-        }
-        if (result.getOrigins().getQuantity() < 0) {
-            return objectMapper.writeValueAsString(result);
-        }
-
-        Origin origin = result.getOrigins().getItems().get(0);
+        final Origin origin = firstOrigin.get();
 
         var b = new ArrayList<String>();
-        b.add(" ID: %s".formatted(origin.getId()));
-        b.add(" path: %s".formatted(origin.getOriginPath()));
-        b.add(" S3 Origin Config: %s".formatted(origin.getS3OriginConfig()));
+        b.add("  %-15s : %s".formatted("cdn-path", origin.getOriginPath()));
+        b.add("  %-15s : %s".formatted("s3", origin.getDomainName()));
+        b.add("  %-15s : %s".formatted("domain-aliases", configData.getAliases()));
+
+        String distID = configData.getDistID();
+        String cdnUrl = CDN_ORIGINS_URL_FORMAT.formatted(distID);
+        String s3Url = S3_URL_FORMAT.formatted(origin.getOriginPath());
+        b.add("  %-15s : %s".formatted("dist-id", distID));
+        b.add("  %-15s : %s".formatted("cdn-link", cdnUrl));
+        b.add("  %-15s : %s".formatted("s3-link", s3Url));
+
         return StringUtils.collectionToDelimitedString(b, System.lineSeparator());
     }
 
@@ -182,7 +193,7 @@ public class CDNCommands {
                 .withDistributionConfig(distConfig);
         UpdateDistributionResult result = cloudFrontClient.updateDistribution(request);
 
-        return "Success; etag=%s%s".formatted(result.getETag(), INVALIDATE_MESSAGE);
+        return "Success; etag=%s %s".formatted(result.getETag(), INVALIDATE_MESSAGE);
     }
 
     /**
@@ -190,7 +201,7 @@ public class CDNCommands {
      * @return String site/{build-version}/{project-name}
      */
     private BuildInfoDetails findBuildInfoOrThrow(String buildVersion) {
-        String basePath = "site/%s".formatted(buildVersion);
+        String basePath = "site/%s/".formatted(buildVersion);
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
                 s3o -> s3o.getKey().startsWith(basePath) && s3o.getKey().endsWith(buildInfoFile),
                 () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
@@ -204,10 +215,11 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Update the CloudFront distribution origin path", key = "update-path")
+    @ShellMethod(value = "Update the CloudFront distribution origin path", key = {"update-path", "up"})
     public String updatePath(
             @ShellOption(value = "path", help = UPDATE_PATH_HELP) String newPath,
-            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {
+            @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID,
+            @ShellOption(value = "dryRun", help = "Dry Run, no executions", defaultValue = "true") boolean isDryRun) {
 
         var distID = resolveDistID(optionalDistID);
         GetDistributionConfigResult distConfigResult = getDistributionConfig(distID);
@@ -222,6 +234,9 @@ public class CDNCommands {
         String actualPath = resolvePath(newPath);
         validatePath(actualPath);
         log.info("Path resolved is: {}", actualPath);
+        if (isDryRun) {
+            return "Success; etag=none; dryRun=true";
+        }
 
         origin.get().setOriginPath(actualPath);
 
@@ -238,11 +253,12 @@ public class CDNCommands {
     @ShellMethod(value = "List valid sites", key = {"ls", "list"})
     public String listSites() {
         List<BuildInfoCLIOutputDecorator> output = new ArrayList<>();
-        BuildInfoDetails liveBuildInfo = s3RepositoryService.getLiveBuildInfo().orElse(null);
-        log.debug("live: {}", liveBuildInfo);
+
+        DistributionConfigData cdnConfig = cdnService.getDistributionConfig();
+        String deployedCDNS3Key = cdnConfig.getS3Key().orElse("");
 
         s3RepositoryService.findAllBuildsAsDecorators(b -> {
-            boolean isLive = s3RepositoryService.isLive(b.getBuildInfo(), liveBuildInfo);
+            boolean isLive = s3RepositoryService.isLive(b.getBuildInfo(), deployedCDNS3Key);
             b.setLive(isLive);
             output.add(b);
         });
@@ -258,7 +274,7 @@ public class CDNCommands {
     }
 
     private void validatePath(String path) {
-        String comparePath = "%s/build.txt".formatted(path);
+        String comparePath = "%s/build.yml".formatted(path);
         Optional<S3ObjectSummary> found = s3RepositoryService.find(
                 s3o -> s3o.getKey().equalsIgnoreCase(comparePath),
                 () -> new ListObjectsV2Request().withBucketName(s3Bucket.name()).withPrefix(SITE_PATH_NAME));
@@ -310,7 +326,8 @@ public class CDNCommands {
      * @return String The command status message; if any.
      */
     @SneakyThrows
-    @ShellMethod(value = "Invalidate a CloudFront distribution web path", key = "invalidate-path")
+    @ShellMethod(value = "Invalidate a CloudFront distribution web path",
+            key = { "invalidate-path", "inv" })
     public String invalidatePath(
             @ShellOption(value = "path", help = INVALIDATE_PATH_HELP) String path,
             @ShellOption(value = "dist", help = DIST_HELP, defaultValue = "") String optionalDistID) {

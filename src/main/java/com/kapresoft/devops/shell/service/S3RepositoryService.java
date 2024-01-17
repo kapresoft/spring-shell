@@ -63,5 +63,5 @@ public interface S3RepositoryService {
      */
     List<BuildInfoCLIOutputDecorator> findAllBuildsAsDecorators(Consumer<BuildInfoCLIOutputDecorator> consumer);
 
-    boolean isLive(@NonNull BuildInfoDetails buildInfo, @Nullable BuildInfoDetails buildInfoLive);
+    boolean isLive(@NonNull BuildInfoDetails buildInfo, @Nullable String deployedS3Key);
 }

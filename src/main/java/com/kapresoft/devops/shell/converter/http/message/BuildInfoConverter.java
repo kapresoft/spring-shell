@@ -43,6 +43,9 @@ public interface BuildInfoConverter<S, T> extends Converter<S, T> {
                     if (ofNullable(lastModified).isPresent()) {
                         builder.lastModified(lastModified);
                     }
+                    if (builder.build().getBuildNumber().equalsIgnoreCase("manual")) {
+                        builder.manualBuild(true);
+                    }
                     return builder.build();
                 });
     }
@@ -64,6 +67,9 @@ public interface BuildInfoConverter<S, T> extends Converter<S, T> {
                 .orElse(KEY_PATH_FMT.formatted(version, projectConfig.getName()));
         String cdnPath = "/" + keyPath;
         URI s3URI = URI.create(S3_URI_FMT.formatted(projectConfig.getS3Bucket().name(), keyPath));
+        if (b.isManualBuild()) {
+            version = keyPath.replaceFirst("site/", "");
+        }
 
         return of(BuildInfoDetails.builder()
                 .buildInfo(b)

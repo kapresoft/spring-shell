@@ -47,13 +47,14 @@ public class BuildInfoCLIOutputDecorator {
 
     private String p(String label, Object text, boolean... noBulletChar) {
         String formattedLabel = AnsiOutput.toString(AnsiColor.YELLOW, label);
-        boolean optUseBullet = ofNullable(noBulletChar).filter(vararg -> vararg.length > 0)
+        boolean withoutBullet = ofNullable(noBulletChar).filter(vararg -> vararg.length > 0)
                 .map(v -> noBulletChar[0]).orElse(false);
-        if (optUseBullet) {
-            return "  %-20s: %s".formatted(formattedLabel, text);
+        if (!withoutBullet) {
+            formattedLabel = "%s %s".formatted(bulletChar, formattedLabel);
         }
-        return " %s %22s: %s".formatted(bulletChar, formattedLabel, text);
+        return "  %-23s: %s".formatted(formattedLabel, text);
     }
+
     private String live() {
         String liveText = isLive() ? AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, LIVE_TEXT_FMT.formatted(checkMark)) : "";
         return AnsiOutput.toString(AnsiColor.BRIGHT_GREEN, liveText);
@@ -62,7 +63,11 @@ public class BuildInfoCLIOutputDecorator {
     private String header() {
         String bullet = rightPointing + rightPointing;
         String formattedLabel = AnsiOutput.toString(AnsiColor.BRIGHT_BLUE, bullet + " Build-Version");
-        return "%s: %s%s".formatted(formattedLabel, buildInfo.getVersion(), live());
+        String manualBuildText = "";
+        if (buildInfo.getBuildInfo().isManualBuild()) {
+            manualBuildText = " (Local Build)";
+        }
+        return "%s: %s%s%s".formatted(formattedLabel, buildInfo.getVersion(), manualBuildText, live());
     }
 
     @Override

@@ -21,6 +21,7 @@ public class BuildInfo {
     String buildNumber;
     String deployKey;
     Date lastModified;
+    boolean manualBuild;
 
     @Builder(toBuilder = true)
     public BuildInfo(@NonNull String id,
@@ -29,7 +30,8 @@ public class BuildInfo {
                      @Nullable String buildNumber,
                      @Nullable String deployKey,
                      @Nullable Date buildDate,
-                     @Nullable Date lastModified) {
+                     @Nullable Date lastModified,
+                     @Nullable boolean manualBuild) {
         this.date = date;
         this.id = id;
         this.commitHash = commitHash;
@@ -38,6 +40,7 @@ public class BuildInfo {
 
         this.buildDate = buildDate;
         this.lastModified = lastModified;
+        this.manualBuild = manualBuild;
     }
 
 }

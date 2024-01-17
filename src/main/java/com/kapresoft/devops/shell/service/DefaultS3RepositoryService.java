@@ -114,6 +114,10 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
         }
     }
 
+    /**
+     * Might be deleted in the future
+     */
+    @Deprecated
     @NonNull
     @Override
     public Optional<BuildInfoDetails> getLiveBuildInfo() {
@@ -161,10 +165,10 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
         return results;
     }
 
-        @Override
+    @Override
     public void findAll(@NonNull Predicate<S3ObjectSummary> predicate,
-                         @NonNull Supplier<ListObjectsV2Request> requestSupplier,
-                         @NonNull Consumer<Stream<S3ObjectSummary>> streamConsumer) {
+                        @NonNull Supplier<ListObjectsV2Request> requestSupplier,
+                        @NonNull Consumer<Stream<S3ObjectSummary>> streamConsumer) {
         ListObjectsV2Request request = requestSupplier.get();
 
         ListObjectsV2Result response;
@@ -225,9 +229,9 @@ public class DefaultS3RepositoryService implements S3RepositoryService {
     }
 
     @Override
-    public boolean isLive(@NonNull BuildInfoDetails buildInfo, @Nullable BuildInfoDetails buildInfoLive) {
-        return ofNullable(buildInfoLive)
-                .filter(live -> live.getId().equalsIgnoreCase(buildInfo.getId()))
+    public boolean isLive(@NonNull BuildInfoDetails buildInfo, @Nullable String deployedS3Key) {
+        return ofNullable(deployedS3Key)
+                .filter(live -> live.equals(buildInfo.getKeyPath()))
                 .isPresent();
     }
 
